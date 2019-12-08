@@ -27,3 +27,5 @@ which(data$Month.of.absence == 0)
 data[738:740,]
 summary(data)
 
+cormat <- round(cor(data),2)
+
