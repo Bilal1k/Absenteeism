@@ -1,20 +1,46 @@
+---
+title: "Absenteeism"
+author: "Bilal Khaiar"
+date: "12/17/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Introduction
+
+This database was created with records of absenteeism at work from July 2007 to July 2010 at a courier company in Brazil.
+
+An attempt to biuld a machine learning algorithm that can predict hours of absenteeism will be made. Mutiple algorithms will be tried and an enseble will be built from the best models.
+
+The dataset was aquired from UCI Machine Learning Repository. For more information click ([here](https://archive.ics.uci.edu/ml/datasets/Absenteeism+at+work)).
+
+# Methods
+
+## Packages
+
+The following packages are needed to run this project's code.
+```{r libraries, results='hide', message=FALSE, warning=FALSE}
 pack <- c("knitr", "tidyverse", "textreadr", "lubridate",
           "stringr", "scales","rpart","randomForest","Rborist",
           "caret", "arm", "mboost","MASS",
-          "glmnet","Matrix","ipred","e1071","Rborist", "nnet", "nodeHarvest")
-          
+          "glmnet","Matrix","ipred","e1071", "nnet",
+          "deepnet", "qrnn")
 
-
-# In orderto run keras and Tensorflow, conda is needed, it can be downloaded from this link https://www.anaconda.com/distribution/#download-section
-
+# Check if all packages are already installed, if not, install them.
 new.packages <- pack[!(pack %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
+# loop to load all packages.
 lapply(pack, library, character.only = TRUE)
+```
 
+## Preparing the Data
 
+The data set and the attached info file will both be downloaded.
 
-# The database was created with records of absenteeism at work from July 2007 to July 2010 at a courier company in Brazil.
+```{r download, message=FALSE, warning=FALSE, results='hide'}
 temp <- tempfile()
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00445/Absenteeism_at_work_AAA.zip",temp)
 data <- read.csv2(unz(temp, "Absenteeism_at_work.csv"))
@@ -24,37 +50,64 @@ temp <- tempfile()
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00445/Absenteeism_at_work_AAA.zip",temp)
 info <- read_docx(unzip(temp, "Attribute Information.docx"), skip = 1)[1:44]
 unlink(temp)
-info
+```
 
 
+## Exploratory Analysis
+In order to get insights into the dataset, some exploratory analysis will be made.
+
+```{r explore}
 str(data)
-
 sum(apply(data, 2, anyNA))
-# No NAs
-
-length(unique(data$ID))
-
+length(unique(data$Absenteeism.time.in.hours))
+summary(as.factor(data$Absenteeism.time.in.hours))
 sort(unique(data$Reason.for.absence))
-# No absenteeism due to reason 20.
+```
 
-# creast a list with reasons
+The dataset has 21 variables and 751 observations. most of observations are stored as integers although some are actually catagorical.
+
+There are no missing values which will make anaylsis and prediction easier.
+
+Although with only 19 unique values, it would have been possible to  treat the target variable as an ordinal catagorical variable rather than a continuous one, but with multiple bins having only one or few observations, it would be hard to treat this as a classifying problem.
+
+No absenteeism due to reason 20.
+
+A list with naems of reasons will be created from the info file.
+
+```{r reasons}
 reason_n <- c(0,info[4:22],info[24]) # get reasons names form info file. Skip the 23rd line as reason 20 is absent form the data
 c <- c("patient follow-up", "medical consultation",
        "blood donation", "laboratory examination",
        "unjustified absence", "physiotherapy",
        "dental consultation") # list non ICD reasons
 reason_n[22:28] <- c # add non ICD reasons
+```
 
 
+## Visualizaiton
+An attempt to visualize some aspect of the data will be made in order the better understand the distribution and the relationship between some variables. 
+
+```{r distribution, fig.show='hold', out.width='25%'}
 data %>% ggplot(aes(Day.of.the.week)) + geom_histogram()
 data %>% ggplot(aes(ID)) + geom_histogram()
 data %>% ggplot(aes(Service.time)) + geom_histogram()
 data %>% ggplot(aes(Absenteeism.time.in.hours)) + geom_histogram()
+```
+\
+Most of the data is not normally distributed.
+
+```{r reasons distribution}
 data %>% ggplot(aes(as.factor(Reason.for.absence))) + 
   geom_histogram(stat = 'count') +
   scale_x_discrete(label = str_trunc(reason_n, 40)) +
   theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10))
+```
 
+Most common reason for absence is medical consultations, while
+
+In order to get a quick glimps into how each variable causes variations in the target, a loop that will calculate the standard deviation for the target variable when other variable are grouped into bins will be made.
+
+```{r target sd loop}
 variable <- colnames(data)[1:20] # is a `vector` now
 data1 <- list() # initialize as a `list`
 for(i in variable){ 
@@ -67,9 +120,11 @@ for(i in variable){
 kable(arrange(tibble(var = names(data1),
                      absent.sd = unlist(data1)),
               desc(absent.sd)))
+```
 
+A couple of error bars will be made to check how some variables can affect the target.
 
-
+````{r error bars}
 data %>% group_by(Day.of.the.week) %>%
   summarise(n = n(), 
             avg = mean(Absenteeism.time.in.hours), 
@@ -88,7 +143,6 @@ data %>% group_by(Work.load.Average.day) %>%
   geom_errorbar(aes(ymin=avg - 2*se, ymax=avg+2*se)) +
   theme(axis.text.x = element_text(angle = 65, hjust = 1)) 
 
-
 data %>% group_by(Reason.for.absence) %>%
   summarise(n = n(), 
             avg = mean(Absenteeism.time.in.hours), 
@@ -99,29 +153,64 @@ data %>% group_by(Reason.for.absence) %>%
   scale_x_discrete(label = str_trunc(reason_n, 40)) +
   theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10)) +
   geom_errorbar(aes(ymin=avg - 2*se, ymax=avg+2*se))
+```
 
-# Most of the avareges' standard errors overlap. this shows that if each variable is used on its own, it will not be a good predicter in a liner model.  
+ Most of the avareges' standard errors overlap. this shows that if each variable is used on its own, it will not be a good predicter in a liner model.  
 
 
-
-# change catogorical data into class factor and change work load avarages to a numerical vector.
+# Wrangling
+catogorical data wil be changed into class factor and the  work load avarages will be converted into a numerical vector.
+```{r change class}
 data_w <- data %>% 
   mutate_at(c(1,2,3,4,5), as.factor) %>% 
   mutate(Work.load.Average.day =
-           as.numeric(levels(Work.load.Average.day))[Work.load.Average.day])
+            as.numeric(levels(Work.load.Average.day))[Work.load.Average.day])
+```
 
+An index for numeric variables will be created in order ease analysis of numeric features.
+```{r numeric index}
+nums <- unlist(lapply(data_w, is.numeric))
+```
 
-# Creat a subset of numeric predictors
-nums <- unlist(lapply(data_w, is.numeric))  
+## Outliers
+A box plot will be created for all numerical variable to visualize outliers.
 
+```{outliers boxplot}
+data_w %>% gather(key = "key", value ="value", -c(names(data_w[,!nums]))) %>% 
+  ggplot(aes(key,value)) + geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10))
+```
+\
 
-# scale numerical variables to avoid model bias towards variable with higher ranges
-data_w[,nums] <- apply(data_w[,nums], 2,rescale)
+variabels that had visible outliers in the previous plot will be examined
 
-# calculate correlation matrix and visualize as heatmap
+```{r outliers exam}
+head(sort(data_w$Age, decreasing = TRUE))
+head(sort(data_w$Height, decreasing = TRUE))
+head(sort(data_w$Height))
+summary(data$Height)
+summary(data_w$Hit.target)
+summary(data_w$Service.time)
+summary(data_w$Absenteeism.time.in.hours)
+```
+
+The only variable with many real outliers is the target variable, no observation will be removed or substituted from it from it.
+
+Other variable look relativly reasonalbe. Since there were no extreme or unrealistic values, no  outlier processing will be made
+
+## Scaling
+
+Numerical variables will be scaled to avoid model bias towards variables with longer ranges. all variable will be represented with values from 0 t0 1
+```{r scaling}
+data_w[,nums] <- apply(data_w[,nums], 2, scales::rescale)
+```
+## Multicollinearity
+
+Correlation matrix will be created and visualized as a heatmap
+```{r corr matrix}
 cor.dat <- cor(data_w[,nums])
 heatmap(cor.dat, scale="column")
-
+```
 
 with(data_w,c(cor(Weight, Body.mass.index)))
 # Since weight and body mass index are highly correlated, the body mass index variable will be removed to avoid collinearity. Intuitvly, it is calculated from weight and height and as both are avaiblein the data, it was removed.
@@ -133,22 +222,24 @@ data_w$Body.mass.index <- NULL
 
 # create a test set
 set.seed(1, sample.kind="Rounding")
-test_index <- createDataPartition(y = data_w$Absenteeism.time.in.hours, times = 1, p = 0.2, list = FALSE)
+test_index <- createDataPartition(y = data_w$Absenteeism.time.in.hours,
+                                  times = 1, p = 0.2, list = FALSE)
 train <- data_w[-test_index,]
-test <- data_w[test_ind0ex,]
+test <- data_w[test_index,]
+y <- data$Absenteeism.time.in.hours[test_index] # non wrangled version for validation
 
 
 # models
 models <- c("glm","knn","bayesglm", "glmboost",
-            "treebag","Rborist","rf", "nnet", "nodeHarvest")
+            "rf", "nnet", "dnn")
 
 # train models on dataset
-set.seed(2, sample.kind = "Rounding")
+set.seed(2, samle.kind = "Rounding")
 fits <- lapply(models, function(model){
   set.seed(2, sample.kind = "Rounding")
   print(model)
   caret::train(Absenteeism.time.in.hours ~ ., method = model, data = train)
-}) 
+})
 names(fits) <- models
 
 # predict using models
@@ -156,12 +247,14 @@ y_hat <- sapply(fits, function(fits){
   predict(fits, test)
 })
 
-# get model prediction accuracy
-acc <- apply(y_hat, 2, function(y_hat){
-  RMSE(y_hat,test$Absenteeism.time.in.hours)
-})
+y_hats_rescaled <- y_hat*(max(y)-min(y))-min(y)
 
-acc_res <- acc*(max(y)-min(y))-min(y)
+# get model prediction accuracy
+acc <- apply(y_hat, 2, function(x){
+  RMSE(y_hats_rescaled,y)
+})
+acc
+
 
 # Ensembles by majoraty vote
 ensemble <- apply(y_hat, 1, function(x) {
