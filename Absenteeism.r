@@ -1,8 +1,7 @@
 pack <- c("knitr", "tidyverse", "textreadr", "lubridate",
-          "stringr", "scales","rpart","randomForest","Rborist",
-          "caret", "arm","MASS",
-          "Matrix","ipred","e1071", "nnet",
-          "deepnet")
+          "stringr", "scales","rpart","randomForest", "KRLS"
+          "caret", "MASS", "foreach", "import", 'neuralnet', "foba",
+          "Matrix","ipred","e1071", "penalized","rqPen","bst")
 
 
 
@@ -25,6 +24,8 @@ temp <- tempfile()
 download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00445/Absenteeism_at_work_AAA.zip",temp)
 info <- read_docx(unzip(temp, "Attribute Information.docx"), skip = 1)[1:44]
 unlink(temp)
+
+
 info
 
 
@@ -136,6 +137,7 @@ summary(data$Height)
 summary(data_w$Hit.target)
 summary(data_w$Service.time)
 summary(data_w$Absenteeism.time.in.hours)
+summary(as.factor(data_w$Absenteeism.time.in.hours))
 # the only variable with many outliers is the target variable, no observation will be removed from it.
 # since there were no extreme or unrealistic values, no need to remove any outliers.
 
@@ -144,7 +146,7 @@ summary(data_w$Absenteeism.time.in.hours)
 # outliers can decrease accuracy of models.
 # create a fucntion that exchange the outliers with the 5th  and 95th percintiles.
 
-caps <- function(x){
+caps_outliers <- function(x){
   qnt <- quantile(x, c(0.25, 0.75))
   cap <- quantile(x, c(.05, .95 ) )
   H <- 1.5 * IQR(x)
@@ -156,7 +158,9 @@ caps <- function(x){
 
 
 #use the caps function to convert outliers from all numerical variables except Absenteeism
-data_w[,nums_f] <- apply(data_w[,nums_f],2,caps)
+nums_t <- nums
+nums_t[21] <- FALSE
+data_w[,nums_t] <- apply(data_w[,nums_t],2,caps_outliers)
 ###
 
 
@@ -175,32 +179,49 @@ with(data_w,c(cor(Weight, Body.mass.index)))
 # Multicollinearity can reduce prediction accuracy.
 data_w$Body.mass.index <- NULL
 
+# Dummy all factors
+data_w <- dummy_cols(data_w, remove_selected_columns = TRUE)
+
+
+# PCA
+data_w$Absenteeism.time.in.hours -> y
+data_w$Absenteeism.time.in.hours <- NULL
+pca <-prcomp(data_w)
+dim(pca$x)
+
+#proportion of variance explained
+variablity <- pca$sdev^2/sum(pca$sdev^2)
+
+sum(variablity[1:45])
+
+plot(cumsum(variablity))
+
+data_pca <- pca$x[,1:45]
+
 # create a test set
 set.seed(1, sample.kind="Rounding")
-test_index <- createDataPartition(y = data_w$Absenteeism.time.in.hours,
-                                  times = 1, p = 0.2, list = FALSE)
-train <- data_w[-test_index,]
-temp <- data_w[test_index,]
+test_index <- createDataPartition(y,times = 1, p = 0.2, list = FALSE)
+train <- data_pca[-test_index,]
+test <- data_pca[test_index,]
 
-test <- temp %>% 
-  semi_join(train, by = "Absenteeism.time.in.hours")
-
-# Add rows removed from test set back into train set
-removed <- anti_join(temp, test)
-train <- rbind(train, removed)
-
+train_y <- y[-test_index]
+test_y <- y[test_index]
 # models
-models <- c("glm","knn","bayesglm", "glmboost",
-            "rf", "nnet")
+models <- c("lm", "mlp", "knn", "penalized","rqnc","krlsPoly","foba","BstLm")
 
 # train models on dataset
 set.seed(2, sample.kind = "Rounding")
 fits <- lapply(models, function(model){
   set.seed(2, sample.kind = "Rounding")
   print(model)
-  caret::train(Absenteeism.time.in.hours ~ ., method = model, data = train)
+  caret::train(train,train_y, method = model)
 })
 
+
+fits$krlsPoly <-  caret::train(train,train_y, method = "krlsPoly")
+fits$foba <-  caret::train(train,train_y, method = "foba")
+fits$BstLm <-  caret::train(train,train_y, method = "BstLm")
+BstLm
 names(fits) <- models
 
 # predict using models
@@ -212,24 +233,31 @@ y_hats_rescaled <- y_hat*(max(y)-min(y))-min(y)
 
 # get model prediction accuracy
 acc <- apply(y_hat, 2, function(x){
-  RMSE(x, test$Absenteeism.time.in.hours)
+  RMSE(x, test_y)
 })
 
 acc
-y <- data$Absenteeism.time.in.hours
-acc_res <- acc*(max(y)-min(y))-min(y)
 
+real_y <- data$Absenteeism.time.in.hours
+
+acc_res <- acc*(max(real_y)-min(real_y))-min(real_y)
+summary(acc_res)
 acc_res
+```
+
 # Ensembles by majoraty vote
-ensemble <- apply(y_hat, 1, mean)
+ensemble <- apply(y_hat[,c(1,4,6)], 1, mean)
 
 
-acc_ens <- RMSE(ensemble, test$Absenteeism.time.in.hours)
+acc_ens <- RMSE(ensemble, test_y)
 acc_ens
 
-acc_ens*(max(y)-min(y))-min(y)
+acc_ens*(max(real_y)-min(real_y))-min(real_y)
 
-error <- as.data.frame(abs(y_hats_rescaled - test_ns$Absenteeism.time.in.hours))
+y_hats_rescaled <- y_hat*(max(Y)-min(Y))-min(Y)
+
+
+error <- as.data.frame(abs(y_hats_rescaled - data$Absenteeism.time.in.hours[]))
 summary(error)
 boxplot(error)
 
@@ -239,7 +267,10 @@ temp <- data[test_index,]
 test_ns <- temp %>% 
   semi_join(train_ns, by = "Absenteeism.time.in.hours")
 
-test_ns <- cbind(test_ns$, error)
+test_ns <- cbind(test_ns$error)
 head(test_ns)
 test_ns %>% filter(knn > 11)
 
+
+cat <- data_w[,!nums]
+dum <- dummy_cols(cat, remove_selected_columns = TRUE)
