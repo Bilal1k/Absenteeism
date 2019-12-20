@@ -1,8 +1,9 @@
 pack <- c("knitr", "tidyverse", "textreadr", "lubridate",
           "stringr", "scales","rpart","randomForest","Rborist",
-          "caret", "arm", "mboost","MASS",
-          "glmnet","Matrix","ipred","e1071","Rborist", "nnet", "nodeHarvest")
-          
+          "caret", "arm","MASS",
+          "Matrix","ipred","e1071", "nnet",
+          "deepnet")
+
 
 
 # In orderto run keras and Tensorflow, conda is needed, it can be downloaded from this link https://www.anaconda.com/distribution/#download-section
@@ -34,8 +35,18 @@ sum(apply(data, 2, anyNA))
 
 length(unique(data$ID))
 
+unique(data$Absenteeism.time.in.hours)
+
+length(unique(data$Absenteeism.time.in.hours))
+
+# with only 19 unique values, it is possible to  treat it as an ordinal catagorical variable rather than a continuous one.
+summary(as.factor(data$Absenteeism.time.in.hours))
+# with multiple bins having only one or few observation, it would be hard to treat this as a classifieng problem
+
 sort(unique(data$Reason.for.absence))
 # No absenteeism due to reason 20.
+
+
 
 # creast a list with reasons
 reason_n <- c(0,info[4:22],info[24]) # get reasons names form info file. Skip the 23rd line as reason 20 is absent form the data
@@ -108,17 +119,51 @@ data %>% group_by(Reason.for.absence) %>%
 data_w <- data %>% 
   mutate_at(c(1,2,3,4,5), as.factor) %>% 
   mutate(Work.load.Average.day =
-           as.numeric(levels(Work.load.Average.day))[Work.load.Average.day])
+            as.numeric(levels(Work.load.Average.day))[Work.load.Average.day])
+# Create an index for numeric variables
+nums <- unlist(lapply(data_w, is.numeric))
+
+# visualize outliers in each variable
+data_w %>% gather(key = "key", value ="value", -c(names(data_w[,!nums]))) %>% 
+  ggplot(aes(key,value)) + geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10))
+
+# Examining outliers
+head(sort(data_w$Age, decreasing = TRUE))
+head(sort(data_w$Height, decreasing = TRUE))
+head(sort(data_w$Height))
+summary(data$Height)
+summary(data_w$Hit.target)
+summary(data_w$Service.time)
+summary(data_w$Absenteeism.time.in.hours)
+# the only variable with many outliers is the target variable, no observation will be removed from it.
+# since there were no extreme or unrealistic values, no need to remove any outliers.
+
+####    
+# For outliers  that lie outside the 1.5 * interquartile range "IQR" limits, we could cap it by replacing those observations outside the lower limit with the value of 5th percentile and those that lie above the upper limit, with the value of 95th percentile. Below is a sample code that achieves this.
+# outliers can decrease accuracy of models.
+# create a fucntion that exchange the outliers with the 5th  and 95th percintiles.
+
+caps <- function(x){
+  qnt <- quantile(x, c(0.25, 0.75))
+  cap <- quantile(x, c(.05, .95 ) )
+  H <- 1.5 * IQR(x)
+  x[x < (qnt[1] - H)] <- cap[1]
+  x[x > (qnt[2] + H)] <- cap[2]
+  x
+}
 
 
-# Creat a subset of numeric predictors
-nums <- unlist(lapply(data_w, is.numeric))  
+
+#use the caps function to convert outliers from all numerical variables except Absenteeism
+data_w[,nums_f] <- apply(data_w[,nums_f],2,caps)
+###
 
 
 # scale numerical variables to avoid model bias towards variable with higher ranges
-data_w[,nums] <- apply(data_w[,nums], 2,rescale)
+data_w[,nums] <- apply(data_w[,nums], 2, scales::rescale)
 
-# calculate correlation matrix and visualize as heatmap
+# calculate correlation matrix and visualize it as a heatmap
 cor.dat <- cor(data_w[,nums])
 heatmap(cor.dat, scale="column")
 
@@ -128,19 +173,25 @@ with(data_w,c(cor(Weight, Body.mass.index)))
 
 
 # Multicollinearity can reduce prediction accuracy.
-
 data_w$Body.mass.index <- NULL
 
 # create a test set
 set.seed(1, sample.kind="Rounding")
-test_index <- createDataPartition(y = data_w$Absenteeism.time.in.hours, times = 1, p = 0.2, list = FALSE)
+test_index <- createDataPartition(y = data_w$Absenteeism.time.in.hours,
+                                  times = 1, p = 0.2, list = FALSE)
 train <- data_w[-test_index,]
-test <- data_w[test_ind0ex,]
+temp <- data_w[test_index,]
 
+test <- temp %>% 
+  semi_join(train, by = "Absenteeism.time.in.hours")
+
+# Add rows removed from test set back into train set
+removed <- anti_join(temp, test)
+train <- rbind(train, removed)
 
 # models
 models <- c("glm","knn","bayesglm", "glmboost",
-            "treebag","Rborist","rf", "nnet", "nodeHarvest")
+            "rf", "nnet")
 
 # train models on dataset
 set.seed(2, sample.kind = "Rounding")
@@ -148,7 +199,8 @@ fits <- lapply(models, function(model){
   set.seed(2, sample.kind = "Rounding")
   print(model)
   caret::train(Absenteeism.time.in.hours ~ ., method = model, data = train)
-}) 
+})
+
 names(fits) <- models
 
 # predict using models
@@ -156,40 +208,38 @@ y_hat <- sapply(fits, function(fits){
   predict(fits, test)
 })
 
+y_hats_rescaled <- y_hat*(max(y)-min(y))-min(y)
+
 # get model prediction accuracy
-acc <- apply(y_hat, 2, function(y_hat){
-  RMSE(y_hat,test$Absenteeism.time.in.hours)
+acc <- apply(y_hat, 2, function(x){
+  RMSE(x, test$Absenteeism.time.in.hours)
 })
 
+acc
+y <- data$Absenteeism.time.in.hours
 acc_res <- acc*(max(y)-min(y))-min(y)
 
+acc_res
 # Ensembles by majoraty vote
-ensemble <- apply(y_hat, 1, function(x) {
-  tabulatedOutcomes <- table(x)
-  sortedOutcomes <- sort(tabulatedOutcomes, decreasing=TRUE)
-  mostCommonLabel <- names(sortedOutcomes)[1]
-  mostCommonLabel
-})
-RMSE(ensemble,test$Absenteeism)
+ensemble <- apply(y_hat, 1, mean)
 
-# individual methods comparision to the ensemble
-acc > mean(ensemble == mnist_27$test$y)
 
-# mean of training set accuracy estimates
-train_acc <- lapply(fits, function(x){
-  tacc <- x$results$Accuracy
-  mean(tacc)
-})
-mean(train_acc[[1]])
+acc_ens <- RMSE(ensemble, test$Absenteeism.time.in.hours)
+acc_ens
 
-# create ensemble using methods with train accuracy of >= 0.8 
-model_names <- names(train_acc[train_acc >= 0.8])
-y_hat.8 <- y_hat[,model_names]
-ensemble.8 <- apply(y_hat.8, 1, function(x) {
-  tabulatedOutcomes <- table(x)
-  sortedOutcomes <- sort(tabulatedOutcomes, decreasing=TRUE)
-  mostCommonLabel <- names(sortedOutcomes)[1]
-  mostCommonLabel
-})
-mean(ensemble.8 == mnist_27$test$y)
+acc_ens*(max(y)-min(y))-min(y)
+
+error <- as.data.frame(abs(y_hats_rescaled - test_ns$Absenteeism.time.in.hours))
+summary(error)
+boxplot(error)
+
+train_ns <- data[-test_index,]
+temp <- data[test_index,]
+
+test_ns <- temp %>% 
+  semi_join(train_ns, by = "Absenteeism.time.in.hours")
+
+test_ns <- cbind(test_ns$, error)
+head(test_ns)
+test_ns %>% filter(knn > 11)
 
