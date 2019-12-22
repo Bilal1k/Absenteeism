@@ -6,13 +6,13 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache.rebuild = TRUE)
 ```
 # Introduction
 
 This database was created with records of absenteeism at work from July 2007 to July 2010 at a courier company in Brazil.
 
-An attempt to biuld a machine learning algorithm that can predict hours of absenteeism will be made. Mutiple algorithms will be tried and an enseble will be built from the best models.
+An attempt to build a machine learning algorithm that can predict hours of absenteeism will be made. Mutiple algorithms will be tried and an enseble will be built from the best models.
 
 The dataset was aquired from UCI Machine Learning Repository. For more information click ([here](https://archive.ics.uci.edu/ml/datasets/Absenteeism+at+work)).
 
@@ -21,19 +21,20 @@ The dataset was aquired from UCI Machine Learning Repository. For more informati
 ## Packages
 
 The following packages are needed to run this project's code.
+
 ```{r libraries, results='hide', message=FALSE, warning=FALSE}
-pack <- c("knitr", "tidyverse", "textreadr", "lubridate",
-          "stringr", "scales","rpart","randomForest","Rborist",
-          "caret", "arm", "mboost","MASS",
-          "glmnet","Matrix","ipred","e1071", "nnet",
-          "deepnet")
+pack <- c("knitr", "tidyverse", "textreadr", "lubridate","KRLS", "rmarkdown",
+          "stringr", "scales", "caret", "MASS", "foreach","fastDummies",
+          "import", "foba", "Matrix", "penalized","bst")
 
 # Check if all packages are already installed, if not, install them.
 new.packages <- pack[!(pack %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
 # loop to load all packages.
-lapply(pack, library, character.only = TRUE)
+lapply(pack, FUN = function(X) {
+    do.call("require", list(X)) 
+})
 ```
 
 ## Preparing the Data
@@ -54,25 +55,41 @@ unlink(temp)
 
 
 ## Exploratory Analysis
+
 In order to get insights into the dataset, some exploratory analysis will be made.
 
-```{r explore}
+```{r str}
 str(data)
-sum(apply(data, 2, anyNA))
-length(unique(data$Absenteeism.time.in.hours))
-summary(as.factor(data$Absenteeism.time.in.hours))
-sort(unique(data$Reason.for.absence))
 ```
-
 The dataset has 21 variables and 751 observations. most of observations are stored as integers although some are actually catagorical.
 
-There are no missing values which will make anaylsis and prediction easier.
+Although some are catagoric in nature, all variables are stored as intergers except the work load avarges varialbe.
 
-Although with only 19 unique values, it would have been possible to  treat the target variable as an ordinal catagorical variable rather than a continuous one, but with multiple bins having only one or few observations, it would be hard to treat this as a classifying problem.
+```{r NAs}
+# loop to check if each colmun has NAs
+sum(apply(data, 2, anyNA))
+```
+No NAs where found.
 
-No absenteeism due to reason 20.
+```{r explor target}
+# count unique values
+length(unique(data$Absenteeism.time.in.hours))
+# check houw many times each value apear.
+summary(as.factor(data$Absenteeism.time.in.hours))
+```
+The target variable has 19 unique values. Some of those values apear only once or twice. This is seen clearly on values on the higher end. This will pobably make predictions of those values hard due to the lack of data on them.
 
-A list with naems of reasons will be created from the info file.
+The most frequent target observation is 8 at 208 observations. That makes sense as those could be workers that were absent for 1 day only. 
+
+```{r explore reasons}
+sort(unique(data$Reason.for.absence))
+# check what does zero value stand for in the reason variable.
+data$Absenteeism.time.in.hours[data$Reason.for.absence == 0]
+```
+
+Reasons range form 0 to 28 with no absenteeism due to reason 20. The zero reason is most likly an attribute that was assigned to workers who were never absent.
+
+A list with names of reasons will be created from the info file.
 
 ```{r reasons}
 reason_n <- c(0,info[4:22],info[24]) # get reasons names form info file. Skip the 23rd line as reason 20 is absent form the data
@@ -81,20 +98,26 @@ c <- c("patient follow-up", "medical consultation",
        "unjustified absence", "physiotherapy",
        "dental consultation") # list non ICD reasons
 reason_n[22:28] <- c # add non ICD reasons
+reason_n
 ```
-
 
 ## Visualizaiton
-An attempt to visualize some aspect of the data will be made in order the better understand the distribution and the relationship between some variables. 
 
-```{r distribution, fig.show='hold', out.width='25%'}
-data %>% ggplot(aes(Day.of.the.week)) + geom_histogram()
-data %>% ggplot(aes(ID)) + geom_histogram()
+An attempt to visualize some aspect of the data will be made in order the better understand the distributions and the relationship between some variables. 
+
+```{r distribution numeric, fig.show='hold', out.width='25%', warning=FALSE, message=FALSE}
+data %>% ggplot(aes(Hit.target)) + geom_histogram()
+data %>% ggplot(aes(Transportation.expense)) + geom_histogram()
+data %>% ggplot(aes(Age)) + geom_histogram()
 data %>% ggplot(aes(Service.time)) + geom_histogram()
 data %>% ggplot(aes(Absenteeism.time.in.hours)) + geom_histogram()
+data %>% ggplot(aes(Work.load.Average.day)) + geom_histogram(stat="count")
+data %>% ggplot(aes(Height)) + geom_histogram()
+data %>% ggplot(aes(Weight)) + geom_histogram()
+
 ```
 \
-Most of the data is not normally distributed.
+Most of the variables are not normally distributed.
 
 ```{r reasons distribution}
 data %>% ggplot(aes(as.factor(Reason.for.absence))) + 
@@ -102,10 +125,10 @@ data %>% ggplot(aes(as.factor(Reason.for.absence))) +
   scale_x_discrete(label = str_trunc(reason_n, 40)) +
   theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10))
 ```
+\
+Most common reason for absence is medical consultations.
 
-Most common reason for absence is medical consultations, while
-
-In order to get a quick glimps into how each variable causes variations in the target, a loop that will calculate the standard deviation for the target variable when other variable are grouped into bins will be made.
+In order to get a quick glimps into how each variable causes variations on the target, a loop that will calculate the standard deviation for the target variable when each variable is grouped into bins will be made.
 
 ```{r target sd loop}
 variable <- colnames(data)[1:20] # is a `vector` now
@@ -125,6 +148,7 @@ kable(arrange(tibble(var = names(data1),
 A couple of error bars will be made to check how some variables can affect the target.
 
 ````{r error bars}
+# error bar showing effect of week day on absenteeism
 data %>% group_by(Day.of.the.week) %>%
   summarise(n = n(), 
             avg = mean(Absenteeism.time.in.hours), 
@@ -134,6 +158,7 @@ data %>% group_by(Day.of.the.week) %>%
   geom_errorbar(aes(ymin=avg - 2*se, ymax=avg+2*se)) +
   theme(axis.text.x = element_text(angle = 65, hjust = 1))
 
+# error bar showing effect of Work load on absenteeism
 data %>% group_by(Work.load.Average.day) %>%
   summarise(n = n(), 
             avg = mean(Absenteeism.time.in.hours), 
@@ -142,6 +167,8 @@ data %>% group_by(Work.load.Average.day) %>%
   ggplot(aes(as.factor(Work.load.Average.day), avg)) + geom_point() +
   geom_errorbar(aes(ymin=avg - 2*se, ymax=avg+2*se)) +
   theme(axis.text.x = element_text(angle = 65, hjust = 1)) 
+
+# error bar showing effect of Reason for absence on absenteeism
 
 data %>% group_by(Reason.for.absence) %>%
   summarise(n = n(), 
@@ -154,13 +181,16 @@ data %>% group_by(Reason.for.absence) %>%
   theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10)) +
   geom_errorbar(aes(ymin=avg - 2*se, ymax=avg+2*se))
 ```
-
+\
  Most of the avareges' standard errors overlap. this shows that if each variable is used on its own, it will not be a good predicter in a liner model.  
 
 
 # Wrangling
-catogorical data wil be changed into class factor and the  work load avarages will be converted into a numerical vector.
+
+Catogorical data wil be changed into class factor and the work load avarages will be converted into a numerical vector.
+
 ```{r change class}
+# Changing variable classes accoerding to the type of data.
 data_w <- data %>% 
   mutate_at(c(1,2,3,4,5), as.factor) %>% 
   mutate(Work.load.Average.day =
@@ -169,6 +199,7 @@ data_w <- data %>%
 
 An index for numeric variables will be created in order ease analysis of numeric features.
 ```{r numeric index}
+# create a list of numeric variables' indices
 nums <- unlist(lapply(data_w, is.numeric))
 ```
 
@@ -176,8 +207,7 @@ nums <- unlist(lapply(data_w, is.numeric))
 
 ## Outliers
 A box plot will be created for all numerical variable to visualize outliers.
-
-```{outliers boxplot}
+```{r outliers boxplot}
 data_w %>% gather(key = "key", value ="value", -c(names(data_w[,!nums]))) %>% 
   ggplot(aes(key,value)) + geom_boxplot() + 
   theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10))
@@ -187,33 +217,33 @@ data_w %>% gather(key = "key", value ="value", -c(names(data_w[,!nums]))) %>%
 variabels that had visible outliers in the previous plot will be examined
 
 ```{r outliers exam}
-head(sort(data_w$Age, decreasing = TRUE))
-head(sort(data_w$Height, decreasing = TRUE))
-head(sort(data_w$Height))
-summary(data$Height)
+summary(data_w$Height)
 summary(data_w$Hit.target)
 summary(data_w$Service.time)
 summary(data_w$Absenteeism.time.in.hours)
 ```
 
-OUtliers can decrease model accuracy. A funciton that can process the outliers will be created. it will be called caps_outliers(). 
+OUtliers can decrease model accuracy. A function that can process the outliers will be created. it will be called caps_outliers(). 
 
-for the porpose of this project, outliers will be definded according to Tukey Fences.
+For the porpose of this project, outliers will be definded according to Tukey Fences.
 
-Outliers are defined as values falling below Q1-1.5(Q3-Q1) or above Q3+1.5(Q3-Q1) where Q1 and Q3 represent the 1st and the 3rd quartiles respectivly. for more information. For more information, click([here](https://archive.org/details/exploratorydataa00tuke_0))
+Outliers will be defined as values falling below Q1-1.5(Q3-Q1) or above Q3+1.5(Q3-Q1) where Q1 and Q3 represent the 1st and the 3rd quartiles respectivly. for more information, click([here](http://sphweb.bumc.bu.edu/otlt/mph-modules/bs/bs704_summarizingdata/bs704_summarizingdata7.html)).
 
-Outliers will be exchanged with values from the 5th percentile and the 95th percentile.
+Outliers will be exchanged with values from the 5th and the 95th percentiles, which can be called capping.
 
-Any changes to the target variable should be done with care. Depending on the purpose of the project, this can artificially increase accuracy because the target will not represent real world data any more. We will basically be predicting a new version of the data that is trimmed and relativly easy to predict.
+Any changes to the target variable should be done with care. Depending on the purpose of the project, this can artificially increase accuracy because the target will not represent real world data any more. We will basically be predicting a new version of the data that is trimmed and relativly easy to predict. 
+
+In this project, outliers from the target varialbe will not be capped.
 
 
 ```{r cap outliers}
+# create a funciton that caps outliers.
 caps_outliers <- function(x){
   qnt <- quantile(x, c(0.25, 0.75))
-  cap <- quantile(x, c(.05, .95 ) )
-  H <- 1.5 * IQR(x)
-  x[x < (qnt[1] - H)] <- cap[1]
-  x[x > (qnt[2] + H)] <- cap[2]
+  cap <- quantile(x, c(0.05, 0.95))
+  fence <- 1.5 * IQR(x)
+  x[x < (qnt[1] - fence)] <- cap[1]
+  x[x > (qnt[2] + fence)] <- cap[2]
   x
 }
 
@@ -221,39 +251,45 @@ caps_outliers <- function(x){
 nums_t <- nums
 nums_t[21] <- FALSE
 
-# use the new function to convert outliers from all numerical variables exceptTarget 
+# use the new function to cap outliers from all numerical variables exceptTarget 
 data_w[,nums_t] <- apply(data_w[,nums_t],2,caps_outliers)
 ```
 
 ## Scaling
 
-Numerical variables will be scaled to avoid model bias towards variables with longer ranges. all variable will be represented with values from 0 to 1.
+Numerical variables will be scaled to avoid possible model bias towards variables with longer ranges. All variable will be represented with values from 0 to 1.
 
 ```{r scaling}
+# rescale numerical variable to have a value from 0 to 1.
 data_w[,nums] <- apply(data_w[,nums], 2, scales::rescale)
 ```
 
 ## Multicollinearity
 
-Multicollinearity is high correlation between features. It can reduce prediction accuracy.
+Multicollinearity can be thought of as high correlation between two or more features. It can reduce prediction accuracy as it makes isolating the effect of each variable on the target less accurate.
 
-A Correlation matrix will be created and visualized as a heatmap
+A Correlation matrix will be created and visualized as a heatmap.
 ```{r corr matrix}
+# create correlation matrix
 cor.dat <- cor(data_w[,nums])
+
+# create correlationb
 heatmap(cor.dat, scale="column")
 
+# check correlation between BMI and weight
 with(data_w,c(cor(Weight, Body.mass.index)))
 ```
 
 Since weight and body mass index are highly correlated, the body mass index variable will be removed to avoid collinearity. Intuitvly, it is calculated from weight and height and as both are avaible in the data, it was removed.
 
 ```{r remove BMI}
+# remove BMI due to high correlation with weight 
 data_w$Body.mass.index <- NULL
 ```
 
 ## Encoding catogorical variable
 
-Many machine learning algorithms do not support categorical values. All catogorical variables will binarized using one hot encoding technique. Each catagorical variable will be reprisented with a number of new variables equal to its number of levels. each variable will have values of ones and zeros to represent the presence or absece of each specific level from each observation.
+Many machine learning algorithms do not support categorical values. All catogorical variables will binarized using one hot encoding technique. Each catagorical variable will be represented with a number of new variables equal to its number of levels. each variable will have either one and zero to represent the presence or absence of each specific level from each observation.
 
 ```{r binarizaiton}
 data_w <- dummy_cols(data_w, remove_selected_columns = TRUE)
@@ -261,50 +297,72 @@ data_w <- dummy_cols(data_w, remove_selected_columns = TRUE)
 dim(data_w)
 ```
 
-due to binarization, the data dimentions increased from 20 predictors to 100. High dimentional data can result in low preforming machine learning algorithms.
+due to binarization, the data dimentions increased 5 folds from 20 to 101 predictors. High dimentional data can result in low preforming machine learning algorithms.
 
 ## Principal Component Analysis (PCA)
 
-PCA is a dimention reduction technique that transform the data into a set of values of linearly uncorrelated variables called principal components. The first principal component has the largest possible variance, and each succeeding component in turn has the highest variance possible under the constraint that it is orthogonal to the preceding components. It can be used to reduce dimention without loosing data variablity.
+PCA is a dimention reduction technique that transform the data into a set of values of linearly uncorrelated variables called principal components. The first principal component has the heighest variance, and each following component has the highest variance under the constraint that it is orthogonal to the previous components. It can be used to reduce dimentions without loosing data variablity.
+
+By reducing dimenitions, it might be possible to get a more accurate model. The downside is that some of the interpretability of the model is lost due to the transformed nature of the features. It not possible to calculate variable importance in predicting the target if PCA technique is used.
 
 The target variable will be seperated from the data before tranformation.
 
 ```{r pca}
+# remove target from data
 data_w$Absenteeism.time.in.hours -> y
 data_w$Absenteeism.time.in.hours <- NULL
+
+# run the PCA fucntion on the rest of the data
 pca <-  prcomp(data_w)
 dim(pca$x)
 
 
-# Proportion of variance explained
+# Proportion of variance calcualted
 variablity <- pca$sdev^2/sum(pca$sdev^2)
+# plot variablity maintained vs number of components 
+plot(cumsum(variablity))
+# check how much variablity is kept if the first 45 components were used.
 sum(variablity[1:45])
 ```
+\
+by using the first 45 components we keep about 94% of the variablity.
 
-by using the first 45 components we keep about 94% of the Variablity
-data_pca <- pca$x[,1:45]
+```{r reduce dim}
+data_pc <- pca$x[,1:45]
+```
 
 # Building Models
 
 ## Partitioning the data
-The data and the target will  be split into a test and a train part. the test set will be 20% of the data.
+The data and the target will be split into a test and a train set the test set will be 20% of the data.
 
 ```{r split, warning=FALSE}
 set.seed(1, sample.kind="Rounding")
-test_index <- createDataPartition(y = data_w$Absenteeism.time.in.hours,
-                                  times = 1, p = 0.2, list = FALSE)
-train <- data_w[-test_index,]
-test <- data_w[test_index,]
+test_index <- createDataPartition(y,times = 1, p = 0.2, list = FALSE)
+train <- data_pc[-test_index,]
+test <- data_pc[test_index,]
 train_y <- y[-test_index]
 test_y <- y[test_index]
 ```
 
 
 ## models
-a loop will try different models using the caret train  funciton.
+
+### Training
+
+a loop will try to fit different models using the caret train function.
+1- lm stands for Linear Regression
+2- mlp stands Multi-Layer Perceptron. It is part of The Stuttgart Neural Network Simulator (SNNS) library
+containing many standard implementations of neural networks. For more information click([here](https://cran.r-project.org/web/packages/RSNNS/RSNNS.pdf)).
+3 - knn stands for the K-nearest Neighbors Algorithm.
+4 - penalized stands for Penalized Linear Regression. Penelized regression models in general that is penalized for having too many variables, the regression coefficients are shunk toward zero. for more information about this specific model click ([here](https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf))
+5 - krlsPoly stands for Polynomial Kernel Regularized Least Squares. It fits multidimensional data for regression and classification problems without relying on linearity or additivity assumptions. For more information click([here(https://cran.r-project.org/web/packages/KRLS/KRLS.pdf)).
+6 - foba stands for Greedy variable selection for ridge regression. As the name describesm, it uses a ridge regression penalty model to select variables. For more information click([here](https://cran.r-project.org/web/packages/foba/foba.pdf)).
+7- BstLm stands for Boosted Linear Model. Boosted models are generellay ensembles of several models. For more information click ([here](https://cran.r-project.org/web/packages/bst/bst.pdf)).
+
 
 ```{r models, results='hide', message=FALSE, warning=FALSE}
-models <- c("lm", "mlp", "knn", "penalized","rqnc","krlsPoly","foba","BstLm")
+models <- c("lm","mlp","knn", "penalized","krlsPoly","foba","BstLm")
 
 # train models on dataset
 fits <- lapply(models, function(model){
@@ -315,70 +373,107 @@ fits <- lapply(models, function(model){
 names(fits) <- models
 ```
 
-predict target using each model on test set data.
+### Prediciotn
+predict test set's target using each model.
 
-```{r prediction, results='hide', message=FALSE, warning=FALSE }
+```{r prediction, results='hide', message=FALSE, warning=FALSE}
 # predict using models
-y_hat <- sapply(fits, function(fits){
-  predict(fits, test)
+y_hat <- sapply(fits, function(x){
+  predict(x, test)
 })
 ```
 
+
+### Accuracy
+
+The accuracy of each model will be calculated using Root Mean Square Error (RMSE).
+```{r rmse, message=FALSE, warning=FALSE}
+rmses <- apply(y_hat, 2, function(x){
+  RMSE(x,test_y)
+})
+rmses
+```
+
+RMSEs are difficult to interpret due the scaled nature of the tareget.
+
+## Ensemble
+
+Predictions from the best three model will be averaged into an ensemble.
+```{r ensemble}
+# Ensembles by mean
+ensemble <- apply(y_hat[,c(4,6,7)], 1, mean)
+
+RMSE(ensemble, test_y)
+```
 
 # Results
 
-The predition accuracy will be checked in this section.
-
-The accuracy of each model using Root Mean Square Error (RMSE) will be assessed
-
-```{r rmse, message=FALSE, warning=FALSE  }
-acc <- apply(y_hat, 2, function(x){
-  RMSE(y_hats_rescaled,y)
-})
-acc
-```
-
-A simple linear regression model preforms better than all other models. The type and size of the data plays a factor on which model to use.
-
-Those RMSEs are difficult to interpret due the scaled nature of the tareget. It will be resclaed to the original range by reversing the min max scaling formula.
+RMSE will be rescaled to the original range by reversing the min max scaling formula. This is done to improve interpretability and to get insights from those predicitons.
 
 ```{r rescaling}
-
+# rescale RMSEs to original scale
 real_y <- data$Absenteeism.time.in.hours
 
-acc_res <- acc*(max(real_y)-min(real_y))-min(real_y)
-summary(acc_res)
-acc_res
+# rescaled models' accuracies
+rmses_res <- rmses*(max(real_y)-min(real_y))-min(real_y)
+rmses_res
+
+# rescaled ensemble accuracy
+paste("ensemble", round(RMSE(ensemble, test_y)*(max(real_y)-min(real_y))-min(real_y), digits = 4))
 ```
 
+Models' accuracies range from `r range(rmses_res)[1]` to `r range(rmses_res)[2]` That would be the average error that we might get in our prediciton measured in hours of absenteesim per month.The ensemble gave the least RMSE.
 
-y_hats_rescaled <- y_hat*(max(y)-min(y))-min(y)
+## Explore model weaknesses
 
+An attempt to further study the models will be made.The relationship between the target variable and the amount of error per model will be explored.
 
-## Ensembles 
+```{r error per model}
+# Predictions will be rescaled to original scale
+y_hats_rescaled <- y_hat*(max(real_y)-min(real_y))-min(real_y)
 
-An ensemble is a product of predictions from different models. an esemble that take the avarge results of the best 4 models will be built.
+# error vectors will be created to measure each models predciotn error
+error <- as.data.frame(abs(y_hats_rescaled - test_y*(max(real_y)-min(real_y))-min(real_y)))
+boxplot(error)
+```
+\
 
-```{r ensemble}
-ensemble <- apply(y_hat[,c(1,2,6,7)], 1, mean)
+The boxplot shows that for each model, there is one value with an extemely high error in prediction.
 
+```{r errors 2}
+Absent <- data$Absenteeism.time.in.hours[test_index]
+test_ns <- cbind(Absent,error)
 
-acc_ens <- RMSE(ensemble, test_y)
-acc_ens
+test_ns %>% gather(key = "model", value = "erorr", -Absent) %>%
+  ggplot(aes(x = Absent, y = erorr, color = model)) + 
+  geom_point() + scale_x_sqrt()
+```
+\
 
-acc_ens*(max(real_y)-min(real_y))-min(real_y)
+We can see that for workers with 120 hours of absenteeism, all of our models performance was highly inaccurate.
 
-# individual methods comparision to the ensemble
-acc > mean(ensemble == mnist_27$test$y)
+```{r bins error}
 
-# mean of training set accuracy estimates
-train_acc <- lapply(fits, function(x){
-  tacc <- x$results$Accuracy
-  mean(tacc)
-})
-mean(train_acc[[1]])
+test_ns %>% group_by(Absent) %>% mutate(n = n()) %>% ungroup() %>%
+  gather(key = "model", value = "erorr", -c(n,Absent)) %>%
+  ggplot(aes(x = n, y = erorr, color = model)) + 
+  geom_point()
+```
+\
+
+This plot show that the lack of accuracy for this subgroup is actually related to the lack of data about high absenteeism.
+
 
 
 # Ref
+Goeman, J. J., L1 penalized estimation
+in the Cox proportional hazards model. Biometrical Journal 52(1), 70–84.
+https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf
+
 Tukey, John W (1977). Exploratory Data Analysis. OCLC 3058187.
 https://archive.org/details/exploratorydataa00tuke_0
+
+Feature Normalization and Likelihood-based
+Similarity Measures for Image Retrieval
+Selim Aksoy and Robert M. Haralick
+http://www.cs.bilkent.edu.tr/~saksoy/papers/prletters01_likelihood.pdf

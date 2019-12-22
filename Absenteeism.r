@@ -1,5 +1,5 @@
 pack <- c("knitr", "tidyverse", "textreadr", "lubridate",
-          "stringr", "scales","rpart","randomForest", "KRLS"
+          "stringr", "scales","rpart","randomForest","KRLS", "fastDummies",
           "caret", "MASS", "foreach", "import", 'neuralnet', "foba",
           "Matrix","ipred","e1071", "penalized","rqPen","bst")
 
@@ -10,7 +10,9 @@ pack <- c("knitr", "tidyverse", "textreadr", "lubridate",
 new.packages <- pack[!(pack %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
-lapply(pack, library, character.only = TRUE)
+lapply(pack, FUN = function(X){
+  do.call("require", list(X)) 
+})
 
 
 
@@ -120,7 +122,7 @@ data %>% group_by(Reason.for.absence) %>%
 data_w <- data %>% 
   mutate_at(c(1,2,3,4,5), as.factor) %>% 
   mutate(Work.load.Average.day =
-            as.numeric(levels(Work.load.Average.day))[Work.load.Average.day])
+           as.numeric(levels(Work.load.Average.day))[Work.load.Average.day])
 # Create an index for numeric variables
 nums <- unlist(lapply(data_w, is.numeric))
 
@@ -218,10 +220,6 @@ fits <- lapply(models, function(model){
 })
 
 
-fits$krlsPoly <-  caret::train(train,train_y, method = "krlsPoly")
-fits$foba <-  caret::train(train,train_y, method = "foba")
-fits$BstLm <-  caret::train(train,train_y, method = "BstLm")
-BstLm
 names(fits) <- models
 
 # predict using models
@@ -229,7 +227,7 @@ y_hat <- sapply(fits, function(fits){
   predict(fits, test)
 })
 
-y_hats_rescaled <- y_hat*(max(y)-min(y))-min(y)
+
 
 # get model prediction accuracy
 acc <- apply(y_hat, 2, function(x){
@@ -241,12 +239,12 @@ acc
 real_y <- data$Absenteeism.time.in.hours
 
 acc_res <- acc*(max(real_y)-min(real_y))-min(real_y)
-summary(acc_res)
+
 acc_res
-```
+
 
 # Ensembles by majoraty vote
-ensemble <- apply(y_hat[,c(1,4,6)], 1, mean)
+ensemble <- apply(y_hat[,c(4,5,7,8)], 1, mean)
 
 
 acc_ens <- RMSE(ensemble, test_y)
@@ -254,23 +252,17 @@ acc_ens
 
 acc_ens*(max(real_y)-min(real_y))-min(real_y)
 
-y_hats_rescaled <- y_hat*(max(Y)-min(Y))-min(Y)
+y_hats_rescaled <- y_hat*(max(real_y)-min(real_y))-min(real_y)
 
 
-error <- as.data.frame(abs(y_hats_rescaled - data$Absenteeism.time.in.hours[]))
+error <- as.data.frame(abs(y_hats_rescaled - test_y*(max(real_y)-min(real_y))-min(real_y)))
 summary(error)
 boxplot(error)
 
-train_ns <- data[-test_index,]
-temp <- data[test_index,]
+Absent <- data$Absenteeism.time.in.hours[test_index]
 
-test_ns <- temp %>% 
-  semi_join(train_ns, by = "Absenteeism.time.in.hours")
+test_ns <- cbind(Absent,error)
 
-test_ns <- cbind(test_ns$error)
-head(test_ns)
-test_ns %>% filter(knn > 11)
-
-
-cat <- data_w[,!nums]
-dum <- dummy_cols(cat, remove_selected_columns = TRUE)
+test_ns %>% gather(key = "model", value = "erorr", -Absent) %>%
+  ggplot(aes(x = Absent, y = erorr, color = model)) + 
+  geom_line()
