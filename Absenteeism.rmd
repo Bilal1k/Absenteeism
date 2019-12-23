@@ -41,13 +41,17 @@ The data set and the attached info file will both be downloaded.
 ```{r download, message=FALSE, warning=FALSE, results='hide'}
 # load dataset from UCI repo
 temp <- tempfile()
-download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00445/Absenteeism_at_work_AAA.zip",temp)
+download.file(
+  "https://archive.ics.uci.edu/ml/machine-learning-databases/00445/Absenteeism_at_work_AAA.zip",
+  temp)
 data <- read.csv2(unz(temp, "Absenteeism_at_work.csv"))
 unlink(temp)
 
 # load info file
 temp <- tempfile()
-download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00445/Absenteeism_at_work_AAA.zip",temp)
+download.file(
+  "https://archive.ics.uci.edu/ml/machine-learning-databases/00445/Absenteeism_at_work_AAA.zip",
+              temp)
 info <- read_docx(unzip(temp, "Attribute Information.docx"), skip = 1)[1:44]
 unlink(temp)
 ```
@@ -63,14 +67,14 @@ str(data)
 The dataset has 21 variables and 751 observations. 
 Although some are categorical in nature, all variables are stored as integers except the work load averages variable.
 
-Check NAs.
+Check missing values.
 ```{r NAs}
 # loop to check if any variable has NAs
 sum(apply(data, 2, anyNA))
 ```
 No NAs where found.
-Explore target variable.
 
+Explore target variable.
 ```{r explor target}
 # count unique values in tahe target variable
 length(unique(data$Absenteeism.time.in.hours))
@@ -93,8 +97,8 @@ Reasons values range from 0 to 28 with no absenteeism due to reason 20. The zero
 A list with names of reasons will be created from the info file.
 ```{r reasons}
 # get reasons names form info file. Skip the 23rd line as reason 20 is absent from the data
-
 reason_n <- c(0,info[4:22],info[24]) 
+
 # list non ICD reasons
 c <- c("patient follow-up", "medical consultation",
        "blood donation", "laboratory examination",
@@ -109,6 +113,7 @@ reason_n
 An attempt to visualize some aspect of the data will be made in order the better understand the distributions and the relationship between some variables. 
 
 ```{r distribution numeric, fig.show='hold', out.width='50%', warning=FALSE, message=FALSE}
+# histograms of numerical variables
 data %>% ggplot(aes(Hit.target)) + geom_histogram()
 data %>% ggplot(aes(Transportation.expense)) + geom_histogram()
 data %>% ggplot(aes(Age)) + geom_histogram()
@@ -123,10 +128,11 @@ data %>% ggplot(aes(Weight)) + geom_histogram()
 Almost all variables are not normally distributed. The height variable can probably be smoothed to normal but normalization will avoided for all variables
 
 ```{r reasons distribution, warning = FALSE, messages = FALSE }
+# histogram of reasons
 data %>% ggplot(aes(as.factor(Reason.for.absence))) + 
   geom_histogram(stat = 'count') +
   scale_x_discrete(label = str_trunc(reason_n, 40)) +
-  theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10)) +
+  theme(axis.text.x = element_text(angle = 65, hjust = 1, size = 10))
 
 ```
 \
@@ -135,11 +141,14 @@ Most common reason for absence is medical consultations.
 In order to get a quick glimps into how each variable causes variations on the target, a loop that will calculate the standard deviation for the target variable when each variable is grouped into bins will be made.
 
 ```{r target sd loop}
-variable <- colnames(data)[1:20] # is a `vector` now
-data1 <- list() # initialize as a `list`
+# create a vectore wiht varaible names 
+variable <- colnames(data)[1:20] 
+# initialize as a list
+data1 <- list()
+# create a loop that calculate target sd for each variable grouped
 for(i in variable){ 
   f <- data %>%
-    group_by_at(i) %>% #changed to `group_by_at`
+    group_by_at(i) %>%
     summarise(median = median(Absenteeism.time.in.hours))
   data1[[i]] <- sd(f$median)
 }
@@ -186,7 +195,9 @@ data %>% group_by(Reason.for.absence) %>%
   geom_errorbar(aes(ymin=avg - 2*se, ymax=avg+2*se))
 ```
 \
+
  Most of the averages' standard errors overlap. This shows that if each variable is used on its own, it will not be a good predictor in a liner model.  When compared, the reason variable seems to give more information than two other variables. 
+ 
 # Wrangling
 Categorical data will be changed into class factor and the work load averages will be converted into a numerical vector.
 
@@ -338,6 +349,7 @@ data_pc <- pca$x[,1:45]
 The data and the target will be split into a test and a train set the test set will be 20% of the data.
 
 ```{r split, warning=FALSE}
+# split data and target.
 set.seed(1, sample.kind="Rounding")
 test_index <- createDataPartition(y,times = 1, p = 0.2, list = FALSE)
 train <- data_pc[-test_index,]
@@ -352,16 +364,17 @@ test_y <- y[test_index]
 ### Training
 
 A Loop will try to fit different models using the caret train function. The following is a brief explanation of each model:
-1- lm stands for Linear Regression.
-2- mlp stands for Multi-Layer Perceptron. It is part of The Stuttgart Neural Network Simulator (SNNS) library containing many standard implementations of neural networks. For more information click ([here](https://cran.r-project.org/web/packages/RSNNS/RSNNS.pdf)).
-3 - knn stands for the K-nearest Neighbors Algorithm.
-4 - penalized stands for Penalized Linear Regression. Panelized regression models in general  are models that are penalized for having too many variables, the regression coefficients are shrunk toward zero. For more information about this specific model click ([here](https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf))
-5 - krlsPoly stands for Polynomial Kernel Regularized Least Squares. It fits multidimensional data for regression and classification problems without relying on linearity or additivity assumptions. For more information click ([here(https://cran.r-project.org/web/packages/KRLS/KRLS.pdf)).
-6 - foba stands for Greedy variable selection for ridge regression. As the name describes, it uses a ridge regression penalty model to select variables. For more information click ([here](https://cran.r-project.org/web/packages/foba/foba.pdf)).
-7- BstLm stands for Boosted Linear Model. Boosted models are generally ensembles of several models. For more information click ([here](https://cran.r-project.org/web/packages/bst/bst.pdf)).
+1. **lm** stands for Linear Regression Model.
+2. **mlp** stands for Multi-Layer Perceptron. It is part of The Stuttgart Neural Network Simulator (SNNS) library containing many standard implementations of neural networks. For more information click ([here](https://cran.r-project.org/web/packages/RSNNS/RSNNS.pdf)).
+3. **knn** stands for the K-nearest Neighbors Algorithm.
+4. **penalized"* stands for Penalized Linear Regression. Panelized regression models in general  are models that are penalized for having too many variables, the regression coefficients are shrunk toward zero. For more information about this specific model click ([here](https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf))
+5. **krlsPoly** stands for Polynomial Kernel Regularized Least Squares. It fits multidimensional data for regression and classification problems without relying on linearity or additivity assumptions. For more information click ([here(https://cran.r-project.org/web/packages/KRLS/KRLS.pdf)).
+6. **foba** stands for Greedy variable selection for ridge regression. As the name describes, it uses a ridge regression penalty model to select variables. For more information click ([here](https://cran.r-project.org/web/packages/foba/foba.pdf)).
+7. **BstLm** stands for Boosted Linear Model. Boosted models are generally ensembles of several models. For more information click ([here](https://cran.r-project.org/web/packages/bst/bst.pdf)).
 
 
 ```{r models, results='hide', message=FALSE, warning=FALSE}
+# list models
 models <- c("lm","mlp","knn", "penalized","krlsPoly","foba","BstLm")
 
 # train models on the train set
@@ -388,6 +401,7 @@ y_hat <- sapply(fits, function(x){
 
 The accuracy of each model will be calculated using Root Mean Square Error (RMSE).
 ```{r rmse, message=FALSE, warning=FALSE}
+# calculate RMSEs 
 rmses <- apply(y_hat, 2, function(x){
   RMSE(x,test_y)
 })
@@ -405,19 +419,21 @@ ensemble <- apply(y_hat[,c(4,6,7)], 1, mean)
 RMSE(ensemble, test_y)
 ```
 
+The ensemble has a lower rmse than the best model.
+
 # Results
 
 RMSE will be rescaled to the original range by reversing the min max scaling formula. This is done to improve interpretability and to get insights from those predictions.
 
 ```{r rescaling}
-# rescales RMSEs to original scale
+# unscaled target
 real_y <- data$Absenteeism.time.in.hours
 
-# rescaled models' accuracies
+# rescale models' RMSEs to real scale
 rmses_res <- rmses*(max(real_y)-min(real_y))-min(real_y)
 rmses_res
 
-# rescaled ensemble accuracy
+# rescale ensemble RMSE
 paste("ensemble", round(RMSE(ensemble, test_y)*(max(real_y)-min(real_y))-min(real_y), digits = 4))
 ```
 
@@ -428,10 +444,10 @@ Models' accuracies range from `r range(rmses_res)[1]` to `r range(rmses_res)[2]`
 An attempt to further study the models will be made. The relationship between the target variable and the amount of error per model will be explored.
 
 ```{r error per model}
-# Predictions will be rescaled to original scale
+# predictions will be rescaled to original scale
 y_hats_rescaled <- y_hat*(max(real_y)-min(real_y))-min(real_y)
 
-# error vectors will be created to measure each models predciotn error
+# error vectors will be created to measure each models predction error
 error <- as.data.frame(abs(y_hats_rescaled - test_y*(max(real_y)-min(real_y))-min(real_y)))
 boxplot(error)
 ```
@@ -441,9 +457,13 @@ The boxplot shows that for each model, there is one value with an extremely high
 
 The amount of error made will be plotted against absenteeism in hours
 ```{r errors 2}
+# unscaled test set target 
 Absent <- data$Absenteeism.time.in.hours[test_index]
+
+# bind errors and target
 test_ns <- cbind(Absent,error)
 
+# plot errors against test target
 test_ns %>% gather(key = "model", value = "error", -Absent) %>%
   ggplot(aes(x = Absent, y = error, color = model)) + 
   geom_point() + scale_x_sqrt()
@@ -453,7 +473,7 @@ test_ns %>% gather(key = "model", value = "error", -Absent) %>%
 We can see that for workers with 120 hours of absenteeism, all of our models’ performances were highly inaccurate.
 
 ```{r bins error}
-
+# plot errors against amount of data on Absenteeism
 test_ns  %>%  group_by(Absent)  %>%  mutate(n = n()) %>% ungroup() %>%
   gather(key = "model", value = "error", -c(n,Absent)) %>%
   ggplot(aes(x = n, y = error, color = model)) + 
@@ -463,17 +483,28 @@ test_ns  %>%  group_by(Absent)  %>%  mutate(n = n()) %>% ungroup() %>%
 
 This plot shows that the lack of accuracy for this subgroup is actually related to the lack of data about high absenteeism.
 
+# Conclusion
 
+Low amount of data on high absenteeism limited all models' performances. In order to be able to use some models that only take numerical variables, we had to encode categorical variables and in turn reduce dimensions using PCA. This process took away our ability to check feature importance and further understand the data.
 
-# Ref
-Goeman, J. J., L1 penalized estimation
-in the Cox proportional hazards model. Biometrical Journal 52(1), 70–84.
-https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf
+## Limitations and future work
 
-Tukey, John W (1977). Exploratory Data Analysis. OCLC 3058187.
-https://archive.org/details/exploratorydataa00tuke_0
+Using other models that can handle categorical features can probably improve our understanding of what increases absenteeism for employees. Further tuning of parameters for the used models can probably improve reduces error. It couldn’t be done in this project due to time constraints.
 
-Feature Normalization and Likelihood-based
-Similarity Measures for Image Retrieval
-Selim Aksoy and Robert M. Haralick
-http://www.cs.bilkent.edu.tr/~saksoy/papers/prletters01_likelihood.pdf
+## Ethical considerations
+
+This project was done for educational and training purposes. It will never be used for any practical decision making. Using data on workers weights and number of sons to predict their absenteeism sounds appalling and can lead to real discrimination in the work place and in the hiring process. Reasonable ethical discretion should always be used when collecting data and building machine learning algorithms.
+
+# References and Citations
+
+1. Introduction to Data Science by Rafael A. Irizarry ([here](https://rafalab.github.io/dsbook)).
+
+2. L1 penalized estimation in the Cox proportional hazards model by Goeman, J. J.,  Biometrical Journal 52(1), 70–84. ([here](https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf))
+
+3. Exploratory Data Analysis by Tukey, John W. ([here](https://archive.org/details/exploratorydataa00tuke_0))
+
+4. Feature Normalization and Likelihood-based Similarity Measures for Image Retrieval by Selim Aksoy and Robert M. Haralick.
+([here](http://www.cs.bilkent.edu.tr/~saksoy/papers/prletters01_likelihood.pdf))
+
+5. Martiniano, A., Ferreira, R. P., Sassi, R. J., & Affonso, C. (2012). Application of a neuro fuzzy network in prediction of absenteeism at work. In Information Systems and Technologies (CISTI), 7th Iberian Conference on (pp. 1-4). IEEE.
+
