@@ -11,7 +11,7 @@ knitr::opts_chunk$set(cache.rebuild = TRUE)
 # Introduction
 In this project, an attempt to build machine learning algorithms that can predict hours of absenteeism of workers will be made. Multiple algorithms will be tried and an ensemble will be built from the best models.
 This dataset was created with records of absenteeism at work from July 2007 to July 2010 at a courier company in Brazil.
-The dataset was acquired from UCI Machine Learning Repository. For more information click ([here](https://archive.ics.uci.edu/ml/datasets/Absenteeism+at+work)).
+The dataset was acquired from UCI Machine Learning Repository. For more information click [here](https://archive.ics.uci.edu/ml/datasets/Absenteeism+at+work).
 
 # Methods
 
@@ -88,7 +88,8 @@ The most frequent target observation is 8 at 208 observations. That makes sense 
 Explore the reasons variable
 ```{r explore reasons}
 sort(unique(data$Reason.for.absence))
-# check what does zero value stand for in the reasons variable by exploring target values for those observations.
+# check what does zero value stand for in the reasons variable by exploring 
+# - target values for those observations.
 data$Absenteeism.time.in.hours[data$Reason.for.absence == 0]
 ```
 
@@ -239,7 +240,7 @@ Outliers can decrease model accuracy. A function that can process the outliers w
 
 For the purpose of this project, outliers will be defined according to Tukey Fences.
 
-Outliers will be defined as values falling below Q1-1.5(Q3-Q1) or above Q3+1.5(Q3-Q1) where Q1 and Q3 represent the 1st and the 3rd quartiles respectively. For more information, click ([here](http://sphweb.bumc.bu.edu/otlt/mph-modules/bs/bs704_summarizingdata/bs704_summarizingdata7.html)).
+Outliers will be defined as values falling below Q1-1.5(Q3-Q1) or above Q3+1.5(Q3-Q1) where Q1 and Q3 represent the 1st and the 3rd quartiles respectively. For more information, click [here](http://sphweb.bumc.bu.edu/otlt/mph-modules/bs/bs704_summarizingdata/bs704_summarizingdata7.html).  
 
 Outliers will be exchanged with values from the 5th and the 95th percentiles. This process  can be called capping.
 
@@ -309,7 +310,7 @@ data_w <- dummy_cols(data_w, remove_selected_columns = TRUE)
 dim(data_w)
 ```
 
-Due to binarization, the data dimensions increased 5 folds from 20 to 101 predictors. High dimensional data can result in low preforming machine learning algorithms.
+Due to binarization, the data dimensions increased 5 folds from 20 to 101 predictors. High dimensional data can result in low preforming machine learning algorithms.  
 
 ## Principal Component Analysis (PCA)
 
@@ -364,15 +365,21 @@ test_y <- y[test_index]
 ### Training
 
 A Loop will try to fit different models using the caret train function. The following is a brief explanation of each model:
-1. **lm** stands for Linear Regression Model.
-2. **mlp** stands for Multi-Layer Perceptron. It is part of The Stuttgart Neural Network Simulator (SNNS) library containing many standard implementations of neural networks. For more information click ([here](https://cran.r-project.org/web/packages/RSNNS/RSNNS.pdf)).
-3. **knn** stands for the K-nearest Neighbors Algorithm.
-4. **penalized"* stands for Penalized Linear Regression. Panelized regression models in general  are models that are penalized for having too many variables, the regression coefficients are shrunk toward zero. For more information about this specific model click ([here](https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf))
-5. **krlsPoly** stands for Polynomial Kernel Regularized Least Squares. It fits multidimensional data for regression and classification problems without relying on linearity or additivity assumptions. For more information click ([here(https://cran.r-project.org/web/packages/KRLS/KRLS.pdf)).
-6. **foba** stands for Greedy variable selection for ridge regression. As the name describes, it uses a ridge regression penalty model to select variables. For more information click ([here](https://cran.r-project.org/web/packages/foba/foba.pdf)).
-7. **BstLm** stands for Boosted Linear Model. Boosted models are generally ensembles of several models. For more information click ([here](https://cran.r-project.org/web/packages/bst/bst.pdf)).
+1. **lm** stands for Linear Regression Model.  
 
+2. **mlp** stands for Multi-Layer Perceptron. It is part of The Stuttgart Neural Network Simulator (SNNS) library containing many standard implementations of neural networks. For more information click [here](https://cran.r-project.org/web/packages/RSNNS/RSNNS.pdf).
 
+3. **knn** stands for the K-nearest Neighbors Algorithm.  
+
+4. **penalized** stands for Penalized Linear Regression. Panelized regression models in general  are models that are penalized for having too many variables, the regression coefficients are shrunk toward zero. For more information about this specific model click [here](https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf).  
+
+5. **krlsPoly** stands for Polynomial Kernel Regularized Least Squares. It fits multidimensional data for regression and classification problems without relying on linearity or additivity assumptions. For more information click [here](https://cran.r-project.org/web/packages/KRLS/KRLS.pdf).  
+
+6. **foba** stands for Greedy variable selection for ridge regression. As the name describes, it uses a ridge regression penalty model to select variables. For more information click [here](https://cran.r-project.org/web/packages/foba/foba.pdf).  
+
+7. **BstLm** stands for Boosted Linear Model. Boosted models are generally ensembles of several models. For more information click [here](https://cran.r-project.org/web/packages/bst/bst.pdf). 
+  
+  
 ```{r models, results='hide', message=FALSE, warning=FALSE}
 # list models
 models <- c("lm","mlp","knn", "penalized","krlsPoly","foba","BstLm")
@@ -434,7 +441,9 @@ rmses_res <- rmses*(max(real_y)-min(real_y))-min(real_y)
 rmses_res
 
 # rescale ensemble RMSE
-paste("ensemble", round(RMSE(ensemble, test_y)*(max(real_y)-min(real_y))-min(real_y), digits = 4))
+paste("ensemble",
+      round(RMSE(ensemble, test_y)*(max(real_y)-min(real_y))-min(real_y),
+            digits = 4))
 ```
 
 Models' accuracies range from `r range(rmses_res)[1]` to `r range(rmses_res)[2]` That would be the average error that we might get in our prediction measured in hours of absenteeism per month. The ensemble gave the least RMSE.
@@ -491,20 +500,20 @@ Low amount of data on high absenteeism limited all models' performances. In orde
 
 Using other models that can handle categorical features can probably improve our understanding of what increases absenteeism for employees. Further tuning of parameters for the used models can probably improve reduces error. It couldn’t be done in this project due to time constraints.
 
+
 ## Ethical considerations
 
 This project was done for educational and training purposes. It will never be used for any practical decision making. Using data on workers weights and number of sons to predict their absenteeism sounds appalling and can lead to real discrimination in the work place and in the hiring process. Reasonable ethical discretion should always be used when collecting data and building machine learning algorithms.
 
 # References and Citations
 
-1. Introduction to Data Science by Rafael A. Irizarry ([here](https://rafalab.github.io/dsbook)).
+1. Introduction to Data Science by Rafael A. Irizarry [here](https://rafalab.github.io/dsbook).  
 
-2. L1 penalized estimation in the Cox proportional hazards model by Goeman, J. J.,  Biometrical Journal 52(1), 70–84. ([here](https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf))
+2. L1 penalized estimation in the Cox proportional hazards model by Goeman, J. J.,  Biometrical Journal 52(1), 70–84. [here](https://cran.r-project.org/web/packages/penalized/vignettes/penalized.pdf).  
 
-3. Exploratory Data Analysis by Tukey, John W. ([here](https://archive.org/details/exploratorydataa00tuke_0))
+3. Exploratory Data Analysis by Tukey, John W. [here](https://archive.org/details/exploratorydataa00tuke_0).  
 
-4. Feature Normalization and Likelihood-based Similarity Measures for Image Retrieval by Selim Aksoy and Robert M. Haralick.
-([here](http://www.cs.bilkent.edu.tr/~saksoy/papers/prletters01_likelihood.pdf))
+4. Feature Normalization and Likelihood-based Similarity Measures for Image Retrieval by Selim Aksoy and Robert M. Hara [here](http://www.cs.bilkent.edu.tr/~saksoy/papers/prletters01_likelihood.pdf).  
 
 5. Martiniano, A., Ferreira, R. P., Sassi, R. J., & Affonso, C. (2012). Application of a neuro fuzzy network in prediction of absenteeism at work. In Information Systems and Technologies (CISTI), 7th Iberian Conference on (pp. 1-4). IEEE.
 

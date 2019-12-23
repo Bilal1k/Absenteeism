@@ -170,6 +170,7 @@ cor.dat <- cor(data_w[,nums])
 # create heat map
 heatmap(cor.dat)
 
+
 # check correlation between BMI and weight
 with(data_w,c(cor(Weight, Body.mass.index)))
 
